@@ -5,12 +5,12 @@ use reqwest::Url;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tokio;
 use zip::ZipArchive;
 
-fn remove_dir_contents<P: AsRef<std::path::Path>>(path: P) -> Result<()> {
+fn remove_dir_contents<P: AsRef<Path>>(path: P) -> Result<()> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         let path = entry.path();
@@ -49,8 +49,9 @@ async fn main() -> Result<()> {
     let choice = choice.trim();
 
     let artifact_name = match choice {
+        "1" => "updated-pack-modrinth.zip",
         "2" => "updated-pack-curseforge.zip",
-        _ => "updated-pack.zip",
+        _ => "updated-pack-prism.zip",
     };
 
     if let Some(asset) = latest_release
@@ -60,7 +61,7 @@ async fn main() -> Result<()> {
     {
         let client = reqwest::Client::new();
         let response = client
-            .get(Url::from_str(asset.browser_download_url.as_str()).expect("fuck."))
+            .get(Url::from_str(asset.browser_download_url.as_str()).expect("Invalid URL"))
             .send()
             .await
             .context("Failed to download asset")?;
@@ -97,13 +98,6 @@ async fn main() -> Result<()> {
         archive
             .extract(&target_dir)
             .context("Failed to extract ZIP archive")?;
-
-        if choice != "2" {
-            let minecraft_dir = target_dir.join(".minecraft");
-            if !minecraft_dir.exists() {
-                fs::create_dir(&minecraft_dir).context("Failed to create .minecraft directory")?;
-            }
-        }
 
         fs::remove_file(temp_file).context("Failed to remove temporary file")?;
 
