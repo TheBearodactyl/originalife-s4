@@ -35,10 +35,28 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to fetch latest release")?;
 
+    println!("Which launcher do you use?");
+    println!("1. Modrinth");
+    println!("2. CurseForge");
+    println!("3. Prism");
+    print!("Enter your choice (1-3): ");
+    io::stdout().flush().context("Failed to flush stdout")?;
+
+    let mut choice = String::new();
+    io::stdin()
+        .read_line(&mut choice)
+        .context("Failed to read user input")?;
+    let choice = choice.trim();
+
+    let artifact_name = match choice {
+        "2" => "updated-pack-curseforge.zip",
+        _ => "updated-pack.zip",
+    };
+
     if let Some(asset) = latest_release
         .assets
         .iter()
-        .find(|a| a.name == "updated-pack.zip")
+        .find(|a| a.name == artifact_name)
     {
         let client = reqwest::Client::new();
         let response = client
@@ -51,22 +69,10 @@ async fn main() -> Result<()> {
             .await
             .context("Failed to read asset content")?;
 
-        let temp_file = PathBuf::from("updated-pack.zip");
+        let temp_file = PathBuf::from(artifact_name);
         fs::write(&temp_file, content).context("Failed to write temporary file")?;
 
-        println!("Which launcher do you use?");
-        println!("1. Modrinth");
-        println!("2. CurseForge");
-        println!("3. Prism");
-        print!("Enter your choice (1-3): ");
-        io::stdout().flush().context("Failed to flush stdout")?;
-
-        let mut choice = String::new();
-        io::stdin()
-            .read_line(&mut choice)
-            .context("Failed to read user input")?;
-
-        let profile_dir = match choice.trim() {
+        let profile_dir = match choice {
             "1" => env::var("APPDATA").context("Failed to get APPDATA")? + r"\ModrinthApp\profiles",
             "2" => {
                 env::var("HOMEDRIVE").context("Failed to get HOMEDRIVE")?
@@ -92,16 +98,18 @@ async fn main() -> Result<()> {
             .extract(&target_dir)
             .context("Failed to extract ZIP archive")?;
 
-        let minecraft_dir = target_dir.join(".minecraft");
-        if !minecraft_dir.exists() {
-            fs::create_dir(&minecraft_dir).context("Failed to create .minecraft directory")?;
+        if choice != "2" {
+            let minecraft_dir = target_dir.join(".minecraft");
+            if !minecraft_dir.exists() {
+                fs::create_dir(&minecraft_dir).context("Failed to create .minecraft directory")?;
+            }
         }
 
         fs::remove_file(temp_file).context("Failed to remove temporary file")?;
 
         println!("Update completed successfully!");
     } else {
-        println!("No new release found or 'updated-pack.zip' not available.");
+        println!("No new release found or '{}' not available.", artifact_name);
     }
 
     Ok(())
