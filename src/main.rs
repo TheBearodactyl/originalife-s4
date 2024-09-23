@@ -2,11 +2,12 @@ use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use octocrab::Octocrab;
 use reqwest;
-use sha2::{Digest, Sha256};
+use reqwest::Url;
 use std::env;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tokio;
 use zip::ZipArchive;
 
@@ -21,53 +22,6 @@ fn remove_dir_contents<P: AsRef<Path>>(path: P) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn get_cache_dir() -> PathBuf {
-    let mut cache_dir = env::temp_dir();
-    cache_dir.push("originalife_s4_cache");
-    fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
-    cache_dir
-}
-
-fn get_cached_file_path(artifact_name: &str, sha256: &str) -> PathBuf {
-    let mut cache_file = get_cache_dir();
-    cache_file.push(format!("{}-{}", sha256, artifact_name));
-    cache_file
-}
-
-async fn download_file(url: &str, total_size: u64, sha256: &str) -> Result<Vec<u8>> {
-    let client = reqwest::Client::new();
-    let pb = ProgressBar::new(total_size);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})").expect("fuck.")
-        .progress_chars("#>-"));
-
-    let mut response = client
-        .get(url)
-        .send()
-        .await
-        .context("Failed to send request")?;
-    let mut content = Vec::with_capacity(total_size as usize);
-
-    while let Some(chunk) = response.chunk().await.context("Failed to read chunk")? {
-        content.extend_from_slice(&chunk);
-        pb.inc(chunk.len() as u64);
-    }
-
-    pb.finish_with_message("Download completed");
-
-    // Verify SHA256
-    let mut hasher = Sha256::new();
-    hasher.update(&content);
-    let result = hasher.finalize();
-    let downloaded_sha256 = format!("{:x}", result);
-
-    if downloaded_sha256 != sha256 {
-        anyhow::bail!("SHA256 mismatch for downloaded file");
-    }
-
-    Ok(content)
 }
 
 #[tokio::main]
@@ -106,24 +60,29 @@ async fn main() -> Result<()> {
         .iter()
         .find(|a| a.name == artifact_name)
     {
-        let url = asset.browser_download_url.as_str();
+        let client = reqwest::Client::new();
+        let url = Url::from_str(asset.browser_download_url.as_str()).expect("Invalid URL");
         let total_size = asset.size;
-        let sha256 = &asset.name[..64];
 
-        let cache_file_path = get_cached_file_path(artifact_name, sha256);
-        let content = if cache_file_path.exists() {
-            println!("Using cached file");
-            let mut file =
-                fs::File::open(&cache_file_path).context("Failed to open cached file")?;
-            let mut content = Vec::new();
-            file.read_to_end(&mut content)
-                .context("Failed to read cached file")?;
-            content
-        } else {
-            let content = download_file(url, total_size as u64, sha256).await?;
-            fs::write(&cache_file_path, &content).context("Failed to write cache file")?;
-            content
-        };
+        let pb = ProgressBar::new(total_size as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+            .expect("fuck.")
+            .progress_chars("#>-"));
+
+        let mut response = client
+            .get(url)
+            .send()
+            .await
+            .context("Failed to send request")?;
+        let mut content = Vec::with_capacity(total_size as usize);
+
+        while let Some(chunk) = response.chunk().await.context("Failed to read chunk")? {
+            content.extend_from_slice(&chunk);
+            pb.inc(chunk.len() as u64);
+        }
+
+        pb.finish_with_message("Download completed");
 
         let temp_file = PathBuf::from(artifact_name);
         fs::write(&temp_file, content).context("Failed to write temporary file")?;
